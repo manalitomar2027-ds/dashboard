@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Project Progress Dashboard v14</title>
+
+  <!-- Tailwind CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <!-- jsPDF + html2canvas for PDF export -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+  <!-- SheetJS (xlsx) for Excel import/export -->
+  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+
+  <style>
+    /* small CSS to keep charts tiny in table */
+    .mini-pie { width: 80px; height: 60px; }
+    .overdue { background: rgba(248,113,113,0.12); } /* red-ish for overdue */
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+  <div class="max-w-7xl mx-auto p-6" id="dashboardWrap">
+
+    <div class="flex items-center justify-between mb-4">
+      <h1 class="text-2xl font-bold">📊 Project Progress Dashboard v14</h1>
+
+      <div class="flex items-center gap-3">
+        <label class="flex items-center gap-2">
+          <input id="darkToggle" type="checkbox" class="rounded">
+          <span class="text-sm">Dark Mode</span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Top controls -->
+    <div class="bg-white rounded-lg shadow p-4 mb-4">
+      <div class="flex flex-wrap gap-4 items-center">
+        <div class="flex items-center gap-2">
+          <label class="font-semibold">Number of Tracks:</label>
+          <input id="trackCount" type="number" min="1" class="w-20 border rounded px-2 py-1" value="7">
+        </div>
+
+        <div class="flex items-center gap-2">
+          <label class="font-semibold">Filter:</label>
+          <select id="statusFilter" class="border rounded px-2 py-1">
+            <option value="all">All</option>
+            <option value="ontrack">On Track</option>
+            <option value="delayed">Delayed</option>
+            <option value="blocked">Blocked</option>
+            <option value="na">N/A</option>
+          </select>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <label class="font-semibold">Sort:</label>
+          <button id="sortBtn" class="px-3 py-1 bg-indigo-600 text-white rounded">Sort: Desc</button>
+        </div>
+
+        <div class="flex items-center gap-2 ml-auto">
+          <input id="importFile" type="file" accept=".xlsx,.xls,.csv" class="text-sm">
+          <button id="importBtn" class="px-3 py-1 bg-yellow-500 rounded text-white">Import</button>
+          <button id="exportXlsx" class="px-3 py-1 bg-green-600 rounded text-white">Export XLSX</button>
+          <button id="exportCsv" class="px-3 py-1 bg-blue-600 rounded text-white">Export CSV</button>
+          <button id="exportPdf" class="px-3 py-1 bg-red-600 rounded text-white">Export PDF</button>
+          <button id="resetBtn" class="px-3 py-1 bg-gray-300 rounded">Reset</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Summary -->
+    <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+      <div class="bg-white p-3 rounded shadow">
+        <p class="font-semibold text-sm">Overall: <span id="summary">N/A</span></p>
+        <div class="w-full h-3 bg-gray-200 rounded mt-1">
+          <div id="summaryBar" class="h-3 rounded" style="width:0%"></div>
+        </div>
+      </div>
+      <div class="bg-white p-3 rounded shadow">
+        <p class="font-semibold text-sm">DEV: <span id="devAvg">N/A</span></p>
+        <div class="w-full h-3 bg-gray-200 rounded mt-1"><div id="devBar" class="h-3 rounded" style="width:0%"></div></div>
+      </div>
+      <div class="bg-white p-3 rounded shadow">
+        <p class="font-semibold text-sm">QA: <span id="qaAvg">N/A</span></p>
+        <div class="w-full h-3 bg-gray-200 rounded mt-1"><div id="qaBar" class="h-3 rounded" style="width:0%"></div></div>
+      </div>
+      <div class="bg-white p-3 rounded shadow">
+        <p class="font-semibold text-sm">STAGE: <span id="stageAvg">N/A</span></p>
+        <div class="w-full h-3 bg-gray-200 rounded mt-1"><div id="stageBar" class="h-3 rounded" style="width:0%"></div></div>
+      </div>
+      <div class="bg-white p-3 rounded shadow">
+        <p class="font-semibold text-sm">PROD: <span id="prodAvg">N/A</span></p>
+        <div class="w-full h-3 bg-gray-200 rounded mt-1"><div id="prodBar" class="h-3 rounded" style="width:0%"></div></div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="overflow-x-auto bg-white rounded shadow">
+      <table class="min-w-full text-sm" id="dashboardTable">
+        <thead class="bg-gray-100">
+          <tr>
+            <th class="px-3 py-2 border">#</th>
+            <th class="px-3 py-2 border">Track Name</th>
+            <th class="px-3 py-2 border">DEV</th>
+            <th class="px-3 py-2 border">QA</th>
+            <th class="px-3 py-2 border">STAGE</th>
+            <th class="px-3 py-2 border">PROD</th>
+            <th class="px-3 py-2 border">Overall</th>
+            <th class="px-3 py-2 border">Pie</th>
+            <th class="px-3 py-2 border">Deadline</th>
+            <th class="px-3 py-2 border">Status</th>
+            <th class="px-3 py-2 border">Owner</th>
+            <th class="px-3 py-2 border">Notes</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+
+    <!-- Charts area -->
+    <div class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div class="bg-white p-4 rounded shadow">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="font-semibold">Track Progress Overview</h3>
+          <button id="downloadOverview" class="px-2 py-1 bg-indigo-600 rounded text-white text-sm">Download PNG</button>
+        </div>
+        <canvas id="overviewChart" height="120"></canvas>
+      </div>
+
+      <div class="bg-white p-4 rounded shadow">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="font-semibold">Status Distribution</h3>
+          <div class="flex gap-2">
+            <button id="toggleStatusType" class="px-2 py-1 bg-indigo-600 rounded text-white text-sm">Switch to Doughnut</button>
+            <button id="downloadStatus" class="px-2 py-1 bg-green-600 rounded text-white text-sm">Download PNG</button>
+          </div>
+        </div>
+        <canvas id="statusChart" height="120"></canvas>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+/* -----------------------------
+   Core state and helpers
+   ----------------------------- */
+const LOCAL_KEY = "dashboard_v14_data_v1";
+let tracks = 7;
+let rowCharts = {}; // keep mini pie instances (keyed by row id)
+let overviewChart, statusChart;
+let statusIsDoughnut = false;
+let sortDesc = true;
+
+const defaultRow = (i) => ({
+  id: i,
+  name: `Track ${i}`,
+  dev: "",
+  qa: "",
+  stage: "",
+  prod: "",
+  deadline: "",
+  status: "na",
+  owner: "",
+  notes: ""
+});
+
+function clampPct(v) {
+  if (v === "" || v === null || typeof v === "undefined") return "";
+  let n = parseInt(v);
+  if (isNaN(n)) return "";
+  if (n < 0) n = 0;
+  if (n > 100) n = 100;
+  return n;
+}
+
+function colorForPct(pct) {
+  if (pct >= 80) return "#4ade80"; // green-400
+  if (pct >= 40) return "#facc15"; // yellow-400
+  return "#f87171"; // red-400
+}
+
+/* -----------------------------
+   Storage: save and restore
+   ----------------------------- */
+function saveDashboard(state) {
+  // state is object { tracks, rows: [...] }
+  localStorage.setItem(LOCAL_KEY, JSON.stringify(state));
+}
+
+function loadDashboard() {
+  const raw = localStorage.getItem(LOCAL_KEY);
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch(e) { return null; }
+}
+
+function clearSaved() {
+  localStorage.removeItem(LOCAL_KEY);
+}
+
+/* -----------------------------
+   UI generation
+   ----------------------------- */
+const tableBody = document.getElementById("tableBody");
+const trackCountEl = document.getElementById("trackCount");
+const statusFilterEl = document.getElementById("statusFilter");
+const sortBtn = document.getElementById("sortBtn");
+const resetBtn = document.getElementById("resetBtn");
+
+function buildTable(state) {
+  // state: { tracks, rows[...] }
+  // destroy existing mini charts
+  Object.values(rowCharts).forEach(c => { try { c.destroy(); } catch(e){} });
+  rowCharts = {};
+  tableBody.innerHTML = "";
+
+  // apply filter + sort in-memory before rendering
+  let rows = state.rows.slice();
+  const filter = statusFilterEl.value;
+  if (filter !== "all") rows = rows.filter(r => (r.status || "na") === filter);
+
+  rows.sort((a,b) => {
+    const aOverall = calcOverall(a);
+    const bOverall = calcOverall(b);
+    return sortDesc ? (bOverall - aOverall) : (aOverall - bOverall);
+  });
+
+  rows.forEach((row, idx) => {
+    const tr = document.createElement("tr");
+    tr.className = "border-b";
+    tr.dataset.rowId = row.id;
+
+    const overall = calcOverall(row);
+    const overdueClass = checkOverdue(row.deadline) ? "overdue" : "";
+
+    tr.innerHTML = `
+      <td class="px-2 py-2 border text-xs">${row.id}</td>
+      <td class="px-2 py-2 border">
+        <input class="track-name border rounded px-2 py-1 w-36 text-sm" value="${escapeHtml(row.name)}">
+      </td>
+      <td class="px-2 py-2 border">
+        <input type="number" min="0" max="100" class="input-dev border rounded px-2 py-1 w-20 text-sm" value="${row.dev}">
+        <div class="w-full h-2 bg-gray-100 rounded mt-1">
+          <div class="dev-bar h-2 rounded" style="width:${overall>=0?row.dev+'%':'0%'}; background:${colorForPct(row.dev||0)}"></div>
+        </div>
+      </td>
+      <td class="px-2 py-2 border">
+        <input type="number" min="0" max="100" class="input-qa border rounded px-2 py-1 w-20 text-sm" value="${row.qa}">
+        <div class="w-full h-2 bg-gray-100 rounded mt-1">
+          <div class="qa-bar h-2 rounded" style="width:${overall>=0?row.qa+'%':'0%'}; background:${colorForPct(row.qa||0)}"></div>
+        </div>
+      </td>
+      <td class="px-2 py-2 border">
+        <input type="number" min="0" max="100" class="input-stage border rounded px-2 py-1 w-20 text-sm" value="${row.stage}">
+        <div class="w-full h-2 bg-gray-100 rounded mt-1">
+          <div class="stage-bar h-2 rounded" style="width:${overall>=0?row.stage+'%':'0%'}; background:${colorForPct(row.stage||0)}"></div>
+        </div>
+      </td>
+      <td class="px-2 py-2 border">
+        <input type="number" min="0" max="100" class="input-prod border rounded px-2 py-1 w-20 text-sm" value="${row.prod}">
+        <div class="w-full h-2 bg-gray-100 rounded mt-1">
+          <div class="prod-bar h-2 rounded" style="width:${overall>=0?row.prod+'%':'0%'}; background:${colorForPct(row.prod||0)}"></div>
+        </div>
+      </td>
+      <td class="px-2 py-2 border text-center">
+        <div class="font-semibold overall-label">${isNaN(overall) ? 'N/A' : overall + '%'}</div>
+      </td>
+      <td class="px-2 py-2 border text-center">
+        <canvas id="miniPie-${row.id}" class="mini-pie"></canvas>
+      </td>
+      <td class="px-2 py-2 border ${overdueClass}">
+        <input type="date" class="deadline-input border rounded px-2 py-1 text-sm" value="${row.deadline || ''}">
+        <div class="text-xs text-gray-500 mt-1">${row.deadline ? formatDate(row.deadline) : ''}</div>
+      </td>
+      <td class="px-2 py-2 border">
+        <select class="status-select border rounded px-2 py-1 text-sm">
+          <option value="na"${(row.status||'na')==='na'?' selected':''}>N/A</option>
+          <option value="ontrack"${(row.status||'')==='ontrack'?' selected':''}>On Track</option>
+          <option value="delayed"${(row.status||'')==='delayed'?' selected':''}>Delayed</option>
+          <option value="blocked"${(row.status||'')==='blocked'?' selected':''}>Blocked</option>
+        </select>
+      </td>
+      <td class="px-2 py-2 border">
+        <input class="owner-input border rounded px-2 py-1 w-28 text-sm" value="${escapeHtml(row.owner || '')}">
+      </td>
+      <td class="px-2 py-2 border">
+        <textarea class="notes-input border rounded px-2 py-1 w-48 text-sm" rows="2">${escapeHtml(row.notes || '')}</textarea>
+      </td>
+    `;
+
+    tableBody.appendChild(tr);
+
+    // create mini pie chart
+    const ctx = document.getElementById(`miniPie-${row.id}`).getContext('2d');
+    const pieData = [
+      Number(row.dev) || 0,
+      Number(row.qa) || 0,
+      Number(row.stage) || 0,
+      Number(row.prod) || 0
+    ];
+    // ensure at least something to render; Chart.js handles zeros
+    rowCharts[row.id] = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: ['DEV','QA','STAGE','PROD'],
+        datasets: [{
+          data: pieData,
+          backgroundColor: ['#60a5fa','#facc15','#34d399','#f97316']
+        }]
+      },
+      options: {
+        responsive: false,
+        cutout: '60%',
+        plugins: { legend: { display: false }, tooltip: { enabled: false } }
+      }
+    });
+  });
+
+  // attach listeners after DOM exists
+  attachRowListeners();
+}
+
+/* -----------------------------
+   row listeners: inputs & updates
+   ----------------------------- */
+function attachRowListeners() {
+  document.querySelectorAll('#tableBody tr').forEach(tr => {
+    const id = Number(tr.dataset.rowId);
+    const inputs = {
+      name: tr.querySelector('.track-name'),
+      dev: tr.querySelector('.input-dev'),
+      qa: tr.querySelector('.input-qa'),
+      stage: tr.querySelector('.input-stage'),
+      prod: tr.querySelector('.input-prod'),
+      status: tr.querySelector('.status-select'),
+      deadline: tr.querySelector('.deadline-input'),
+      owner: tr.querySelector('.owner-input'),
+      notes: tr.querySelector('.notes-input')
+    };
+
+    // on any change -> update storage & visuals
+    Object.values(inputs).forEach(el => {
+      if (!el) return;
+      el.addEventListener('input', () => {
+        // validate numbers
+        if (el.type === 'number') {
+          if (el.value !== '') {
+            if (Number(el.value) > 100) {
+              el.value = 100;
+              showTemporaryWarning("Progress values capped to 100%");
+            } else if (Number(el.value) < 0) {
+              el.value = 0;
+            }
+          }
+        }
+        // update state -> save -> rerender charts/summaries
+        persistFromUI();
+        refreshAfterChange();
+      });
+      // also handle change events for selects & datepickers
+      el.addEventListener('change', () => {
+        persistFromUI();
+        refreshAfterChange();
+      });
+    });
+  });
+}
+
+/* -----------------------------
+   Utilities
+   ----------------------------- */
+function escapeHtml(str) {
+  if (!str && str !== 0) return '';
+  return String(str).replace(/[&<>"']/g, function(m){ return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]; });
+}
+function formatDate(d) {
+  if (!d) return '';
+  // d is YYYY-MM-DD
+  const dt = new Date(d + 'T00:00:00');
+  return dt.toLocaleDateString();
+}
+function checkOverdue(dateStr) {
+  if (!dateStr) return false;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const d = new Date(dateStr + 'T00:00:00');
+  return d < today;
+}
+
+/* -----------------------------
+   Data transformation
+   ----------------------------- */
+function calcOverall(row) {
+  // average of four numeric cells; if no numbers, return NaN
+  const vals = [Number(row.dev)||0, Number(row.qa)||0, Number(row.stage)||0, Number(row.prod)||0];
+  if (vals.every(v => v === 0) && (row.dev === "" && row.qa === "" && row.stage === "" && row.prod === "")) return NaN;
+  const sum = vals.reduce((a,b)=>a+b,0);
+  return Math.round(sum / vals.length);
+}
+
+/* -----------------------------
+   Summaries & charts
+   ----------------------------- */
+function refreshSummaryAndCharts(state) {
+  // compute column averages across visible rows (apply current filter)
+  const rows = state.rows.slice();
+  const filter = statusFilterEl.value;
+  const visible = filter === 'all' ? rows : rows.filter(r => (r.status||'na') === filter);
+
+  const sums = {dev:0, qa:0, stage:0, prod:0};
+  const counts = {dev:0, qa:0, stage:0, prod:0};
+  let overallSum = 0, overallCount = 0;
+  visible.forEach(r => {
+    ['dev','qa','stage','prod'].forEach(k => {
+      const v = Number(r[k]);
+      if (!isNaN(v) && r[k] !== "") { sums[k] += v; counts[k]++; }
+    });
+    const o = calcOverall(r);
+    if (!isNaN(o)) { overallSum += o; overallCount++; }
+  });
+  const devAvg = counts.dev ? Math.round(sums.dev / counts.dev) : 0;
+  const qaAvg = counts.qa ? Math.round(sums.qa / counts.qa) : 0;
+  const stageAvg = counts.stage ? Math.round(sums.stage / counts.stage) : 0;
+  const prodAvg = counts.prod ? Math.round(sums.prod / counts.prod) : 0;
+  const overallAvg = overallCount ? Math.round(overallSum / overallCount) : 0;
+
+  document.getElementById('devAvg').textContent = `${devAvg}%`;
+  document.getElementById('qaAvg').textContent = `${qaAvg}%`;
+  document.getElementById('stageAvg').textContent = `${stageAvg}%`;
+  document.getElementById('prodAvg').textContent = `${prodAvg}%`;
+  document.getElementById('summary').textContent = `${overallAvg}%`;
+
+  // bars
+  const setBar = (id,val) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.width = `${val}%`;
+    el.style.background = colorForPct(val);
+  };
+  setBar('devBar', devAvg);
+  setBar('qaBar', qaAvg);
+  setBar('stageBar', stageAvg);
+  setBar('prodBar', prodAvg);
+  setBar('summaryBar', overallAvg);
+
+  // Overview Chart (bars)
+  const labels = state.rows.map(r => r.name || `Track ${r.id}`);
+  const overalls = state.rows.map(r => calcOverall(r) || 0);
+  if (overviewChart) {
+    overviewChart.data.labels = labels;
+    overviewChart.data.datasets[0].data = overalls;
+    overviewChart.data.datasets[0].backgroundColor = overalls.map(v => colorForPct(v));
+    overviewChart.update();
+  }
+
+  // Status chart
+  const countsStatus = { ontrack:0, delayed:0, blocked:0, na:0 };
+  state.rows.forEach(r => {
+    const s = r.status || 'na';
+    countsStatus[s] = (countsStatus[s] || 0) + 1;
+  });
+  if (statusChart) {
+    statusChart.data.datasets[0].data = [countsStatus.ontrack, countsStatus.delayed, countsStatus.blocked, countsStatus.na];
+    statusChart.update();
+  }
+}
+
+/* -----------------------------
+   Persist UI back into state
+   ----------------------------- */
+function persistFromUI() {
+  // read table and build state
+  const state = { tracks: tracks, rows: [] };
+  document.querySelectorAll('#tableBody tr').forEach(tr => {
+    const id = Number(tr.dataset.rowId);
+    const row = {
+      id,
+      name: tr.querySelector('.track-name').value.trim(),
+      dev: tr.querySelector('.input-dev').value.trim(),
+      qa: tr.querySelector('.input-qa').value.trim(),
+      stage: tr.querySelector('.input-stage').value.trim(),
+      prod: tr.querySelector('.input-prod').value.trim(),
+      deadline: tr.querySelector('.deadline-input').value || "",
+      status: tr.querySelector('.status-select').value || 'na',
+      owner: tr.querySelector('.owner-input').value.trim(),
+      notes: tr.querySelector('.notes-input').value.trim()
+    };
+    state.rows.push(row);
+  });
+  saveDashboard(state);
+}
+
+/* -----------------------------
+   Refresh after any change
+   ----------------------------- */
+function refreshAfterChange() {
+  const state = loadDashboard() || { tracks: tracks, rows: [] };
+  // update mini pies and small progress bars
+  document.querySelectorAll('#tableBody tr').forEach(tr => {
+    const id = Number(tr.dataset.rowId);
+    const r = state.rows.find(rr => rr.id === id) || defaultRow(id);
+    // update progress bars (DOM)
+    const devVal = Number(tr.querySelector('.input-dev').value) || 0;
+    const qaVal = Number(tr.querySelector('.input-qa').value) || 0;
+    const stageVal = Number(tr.querySelector('.input-stage').value) || 0;
+    const prodVal = Number(tr.querySelector('.input-prod').value) || 0;
+    const overall = calcOverall({dev:devVal,qa:qaVal,stage:stageVal,prod:prodVal});
+    // bars
+    const devBar = tr.querySelector('.dev-bar');
+    if (devBar){ devBar.style.width = devVal + '%'; devBar.style.background = colorForPct(devVal); }
+    const qaBar = tr.querySelector('.qa-bar');
+    if (qaBar){ qaBar.style.width = qaVal + '%'; qaBar.style.background = colorForPct(qaVal); }
+    const stageBar = tr.querySelector('.stage-bar');
+    if (stageBar){ stageBar.style.width = stageVal + '%'; stageBar.style.background = colorForPct(stageVal); }
+    const prodBar = tr.querySelector('.prod-bar');
+    if (prodBar){ prodBar.style.width = prodVal + '%'; prodBar.style.background = colorForPct(prodVal); }
+
+    // overall label
+    const ol = tr.querySelector('.overall-label');
+    if (ol) ol.textContent = isNaN(overall) ? 'N/A' : overall + '%';
+
+    // update mini pie
+    const c = rowCharts[id];
+    if (c) {
+      c.data.datasets[0].data = [devVal, qaVal, stageVal, prodVal];
+      c.update();
+    }
+
+    // overdue & highlight
+    const deadlineVal = tr.querySelector('.deadline-input').value;
+    if (checkOverdue(deadlineVal)) tr.classList.add('overdue'); else tr.classList.remove('overdue');
+
+    // if any stage is very low, auto-suggest status (but don't overwrite explicit)
+    const statusSelect = tr.querySelector('.status-select');
+    if (statusSelect) {
+      // only suggest if user hasn't changed from 'na' - we won't auto-overwrite if they've chosen something
+      if (statusSelect.dataset.manual === "true") {
+        // do nothing
+      } else {
+        if (prodVal <= 10 || stageVal <= 10) statusSelect.value = 'blocked';
+        else if (devVal < 50 || qaVal < 50 || stageVal < 50 || prodVal < 50) statusSelect.value = 'delayed';
+        else statusSelect.value = 'ontrack';
+      }
+    }
+  });
+
+  // save & update summary/charts
+  persistFromUI();
+  const newState = loadDashboard();
+  refreshSummaryAndCharts(newState || {tracks, rows: []});
+}
+
+/* -----------------------------
+   Build initial or restored state
+   ----------------------------- */
+function generateTracksFromCount(count, preservedState) {
+  tracks = count;
+  // build state rows: if preservedState has rows, preserve matching ones by id; otherwise create defaults
+  const rows = [];
+  for (let i=1;i<=tracks;i++) {
+    const preserved = preservedState?.rows?.find(r => r.id === i);
+    if (preserved) {
+      rows.push({...defaultRow(i), ...preserved, id: i});
+    } else {
+      rows.push(defaultRow(i));
+    }
+  }
+  const state = { tracks: tracks, rows };
+  saveDashboard(state);
+  buildTable(state);
+  refreshAfterChange();
+}
+
+/* -----------------------------
+   Initialization & events
+   ----------------------------- */
+function initialize() {
+  // restore or create default
+  const saved = loadDashboard();
+  const savedCount = saved?.tracks || Number(trackCountEl.value) || 7;
+  trackCountEl.value = savedCount;
+  generateTracksFromCount(savedCount, saved);
+
+  // overview chart
+  const ctx = document.getElementById('overviewChart').getContext('2d');
+  overviewChart = new Chart(ctx, {
+    type: 'bar',
+    data: { labels: [], datasets: [{ label: 'Overall %', data: [], backgroundColor: [] }] },
+    options: { responsive: true, scales: { y: { beginAtZero:true, max:100 } } }
+  });
+
+  // status chart
+  const ctx2 = document.getElementById('statusChart').getContext('2d');
+  statusChart = new Chart(ctx2, {
+    type: 'pie',
+    data: { labels: ['On Track','Delayed','Blocked','N/A'], datasets: [{ data: [0,0,0,0], backgroundColor: ['#4ade80','#facc15','#f87171','#d1d5db'] }] },
+    options: { responsive: true }
+  });
+
+  // listeners
+  trackCountEl.addEventListener('input', () => {
+    let v = Number(trackCountEl.value) || 1;
+    if (v < 1) v = 1;
+    trackCountEl.value = v;
+    // preserve existing rows where possible
+    const savedState = loadDashboard();
+    generateTracksFromCount(v, savedState);
+    persistFromUI();
+  });
+
+  statusFilterEl.addEventListener('change', () => {
+    const s = loadDashboard();
+    buildTable(s || {tracks, rows: []});
+    refreshAfterChange();
+  });
+
+  sortBtn.addEventListener('click', () => {
+    sortDesc = !sortDesc;
+    sortBtn.textContent = `Sort: ${sortDesc ? 'Desc' : 'Asc'}`;
+    const s = loadDashboard();
+    buildTable(s || {tracks, rows: []});
+    refreshAfterChange();
+  });
+
+  // toggle chart type
+  document.getElementById('toggleStatusType').addEventListener('click', () => {
+    statusIsDoughnut = !statusIsDoughnut;
+    const type = statusIsDoughnut ? 'doughnut' : 'pie';
+    document.getElementById('toggleStatusType').textContent = statusIsDoughnut ? 'Switch to Pie' : 'Switch to Doughnut';
+    statusChart.destroy();
+    const ctx3 = document.getElementById('statusChart').getContext('2d');
+    statusChart = new Chart(ctx3, { type, data: statusChart.data, options: { responsive:true } });
+  });
+
+  // export PNGs
+  document.getElementById('downloadOverview').addEventListener('click', () => {
+    const link = document.createElement('a');
+    link.href = overviewChart.toBase64Image();
+    link.download = 'overview.png';
+    link.click();
+  });
+  document.getElementById('downloadStatus').addEventListener('click', () => {
+    const link = document.createElement('a');
+    link.href = statusChart.toBase64Image();
+    link.download = 'status.png';
+    link.click();
+  });
+
+  // exports
+  document.getElementById('exportCsv').addEventListener('click', exportCSV);
+  document.getElementById('exportXlsx').addEventListener('click', exportXLSX);
+  document.getElementById('exportPdf').addEventListener('click', exportPDF);
+
+  // import
+  document.getElementById('importBtn').addEventListener('click', () => {
+    const f = document.getElementById('importFile').files[0];
+    if (!f) { showTemporaryWarning('Select a file to import'); return; }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const data = e.target.result;
+      let workbook;
+      try {
+        workbook = XLSX.read(data, {type: 'binary'});
+      } catch (err) {
+        showTemporaryWarning('Failed to read file');
+        return;
+      }
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const json = XLSX.utils.sheet_to_json(worksheet, {defval: ""});
+      // map CSV columns to our schema if available
+      const rows = json.map((r, idx) => ({
+        id: idx+1,
+        name: r.Track || r['Track Name'] || r.name || `Track ${idx+1}`,
+        dev: r.DEV || r.Dev || r.dev || "",
+        qa: r.QA || r.qa || "",
+        stage: r.STAGE || r.Stage || r.stage || "",
+        prod: r.PROD || r.Prod || r.prod || "",
+        deadline: r.Deadline || r.deadline || "",
+        status: (r.Status||'').toLowerCase() || 'na',
+        owner: r.Owner || r.owner || "",
+        notes: r.Notes || r.notes || ""
+      }));
+      const state = { tracks: rows.length, rows };
+      saveDashboard(state);
+      trackCountEl.value = rows.length;
+      generateTracksFromCount(rows.length, state);
+      showTemporaryWarning('Imported data');
+    };
+    // read as binary string for xlsx
+    reader.readAsBinaryString(f);
+  });
+
+  // reset
+  resetBtn.addEventListener('click', () => {
+    if (!confirm('Reset dashboard and clear saved data?')) return;
+    clearSaved();
+    trackCountEl.value = 7;
+    generateTracksFromCount(7, null);
+    showTemporaryWarning('Dashboard reset');
+  });
+
+  // dark toggle
+  document.getElementById('darkToggle').addEventListener('change', (e) => {
+    if (e.target.checked) {
+      document.documentElement.classList.add('dark');
+      document.body.classList.add('bg-gray-900','text-gray-100');
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.body.classList.remove('bg-gray-900','text-gray-100');
+    }
+  });
+}
+
+/* -----------------------------
+   Exports
+   ----------------------------- */
+function exportCSV() {
+  const state = loadDashboard();
+  if (!state) { showTemporaryWarning('No data to export'); return; }
+  let csv = 'Track,Track Name,DEV,QA,STAGE,PROD,Overall,Deadline,Status,Owner,Notes\n';
+  state.rows.forEach(r => {
+    const overall = calcOverall(r);
+    const line = [
+      r.id,
+      `"${(r.name||'').replace(/"/g,'""')}"`,
+      r.dev||'',
+      r.qa||'',
+      r.stage||'',
+      r.prod||'',
+      isNaN(overall)?'':overall,
+      r.deadline||'',
+      r.status||'',
+      `"${(r.owner||'').replace(/"/g,'""')}"`,
+      `"${(r.notes||'').replace(/"/g,'""')}"`
+    ];
+    csv += line.join(',') + '\n';
+  });
+  const blob = new Blob([csv], {type: 'text/csv'});
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = 'dashboard_export.csv';
+  link.click();
+}
+
+function exportXLSX() {
+  const state = loadDashboard();
+  if (!state) { showTemporaryWarning('No data to export'); return; }
+  const ws_data = [
+    ['Track','Track Name','DEV','QA','STAGE','PROD','Overall','Deadline','Status','Owner','Notes']
+  ];
+  state.rows.forEach(r => {
+    ws_data.push([r.id, r.name || '', r.dev || '', r.qa || '', r.stage || '', r.prod || '', calcOverall(r) || '', r.deadline || '', r.status || '', r.owner || '', r.notes || '']);
+  });
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(ws_data);
+  XLSX.utils.book_append_sheet(wb, ws, 'Dashboard');
+  XLSX.writeFile(wb, 'dashboard_export.xlsx');
+}
+
+async function exportPDF() {
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF('p','pt','a4');
+  const dashboard = document.getElementById('dashboardWrap');
+  const canvas = await html2canvas(dashboard, { scale: 2 });
+  const imgData = canvas.toDataURL('image/png');
+  const imgWidth = 550;
+  const pageHeight = 780;
+  const imgHeight = canvas.height * imgWidth / canvas.width;
+  let heightLeft = imgHeight;
+  let position = 20;
+  pdf.addImage(imgData, 'PNG', 20, position, imgWidth, imgHeight);
+  heightLeft -= pageHeight;
+  while (heightLeft > 0) {
+    pdf.addPage();
+    position = -pageHeight + 20;
+    pdf.addImage(imgData, 'PNG', 20, position, imgWidth, imgHeight);
+    heightLeft -= pageHeight;
+  }
+  pdf.save('dashboard.pdf');
+}
+
+/* -----------------------------
+   Helper messages
+   ----------------------------- */
+let warnTimeout;
+function showTemporaryWarning(msg) {
+  clearTimeout(warnTimeout);
+  const el = document.createElement('div');
+  el.className = 'fixed bottom-6 right-6 bg-black text-white px-4 py-2 rounded shadow';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  warnTimeout = setTimeout(()=>{ el.remove(); }, 3000);
+}
+
+/* -----------------------------
+   Start / bootstrap
+   ----------------------------- */
+initialize();
+
+/* ensure UI updates when window regains focus (in case of external localStorage change) */
+window.addEventListener('focus', () => {
+  const s = loadDashboard();
+  if (s) {
+    buildTable(s);
+    refreshAfterChange();
+  }
+});
+</script>
+</body>
+</html>
